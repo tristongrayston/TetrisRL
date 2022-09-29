@@ -6,3 +6,7 @@ it has become clear that Tetris has taken it's place as one of the great classic
 requiring a significant amount of concentration, it seems that classic games such as tetris are a perfect start in training
 machines to learn as humans do. 
 
+This can be solved in two major ways: 
+1. The game of tetris can roughly be 'solved' (to a point) with a genetic algorithm.
+2. The game of tetris can also roughly be solved with a Q-learning algorithm.
+
