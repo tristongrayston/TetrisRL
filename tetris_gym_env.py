@@ -7,11 +7,14 @@ import time
 from DQ_Agent import DQNAgent
 import torch
 import matplotlib.pyplot as plt
+import math
 
 import gym
 from gym import spaces
 
 MAX_EPISODE_LENGTH = 100
+
+# EPSILON DECAY starts at 0.5 and at around 50,000 timesteps it goes to around 0.01
 
 class Tetris_env(gym.Env):
     metadata = {'render_modes' : ['human']}
@@ -213,11 +216,15 @@ class Tetris_env(gym.Env):
         current_state = (current_state != 0)
         current_state = np.any(current_state, axis=2)
 
+        #reward = 1 + (self.score - reference_score) - peak
+
+        # Check if terminated. 
+        terminated = self.check_lost()
+
         try:
             # We want to count how many 'holes' there are in each row, starting from the bottom
             count = 0
             rows_in_play = 1
-            height = 0
             for row in reversed(current_state):
                 if 1 in row:
                     count += np.count_nonzero(row==0)
@@ -236,19 +243,25 @@ class Tetris_env(gym.Env):
 
             # print(count)
             # reward =  1 + (self.score/10 - reference_score/10) - count/rows_in_play - (rows_in_play-11)/20
-            reward =  agent.actions_taken/10 + (self.score) - (count + (1/3)*(rows_in_play - 1))/5# - (rows_in_play-11)/20
+            reward_bonus = 0
+            if (terminated == True):
+                reward = -1
+            else:
+                
+                if (self.score - reference_score) > 0:
+                    print('!!!!line clear!!!!')
+                    reward_bonus = 1
+                    
+                if rows_in_play < 10:
+                    reward = 1 - (rows_in_play/10)**0.3 + reward_bonus
+                else: 
+                    reward = 0
+                # reward = -(1/2)*rows_in_play + 5
 
             #print(reward)
         except ValueError:
             reward = 1
-
-        #reward = 1 + (self.score - reference_score) - peak
-
-        # Check if terminated. 
-        if self.check_lost() or self.episode_length > MAX_EPISODE_LENGTH:
-            terminated = True
-
-        terminated = self.check_lost()
+        
         return observation, reward, terminated, {}
 
     def render(self):
@@ -498,13 +511,15 @@ class Piece():
         self.rotation = 0
         self.color = shape_color[shapes.index(shape)]
 
-MAX_TIMESTEPS = 1000
+MAX_TIMESTEPS = 5000
 
 if __name__ == "__main__":
     new_game = Tetris_env()
     new_game.reset()
     new_game.render()
     agent = DQNAgent((20, 10), 4)
+
+    #Do we load off a prev dict? 
     agent.load()
 
     # Make the main game loop. 
@@ -517,6 +532,7 @@ if __name__ == "__main__":
         time_step = 0
         rewards = []
         new_game.reset()
+        agent.replay_memory.erase_memory()
 
         # We explicitly run one base case. 
         observation, reward, terminated, info = new_game.step(3)
@@ -556,7 +572,6 @@ if __name__ == "__main__":
 
             # Check if we lost. If so, we'll just start the game again if max timesteps has not run out
             if terminated:
-                reward -= 10
                 agent.actions_taken = 0
                 new_game.reset()
                 observation, reward, terminated, info = new_game.step(3)
@@ -600,9 +615,4 @@ if __name__ == "__main__":
 
     # TODO: Check if reward normalization makes sense!
     agent.save()
-        
-        
-
-        
-
 

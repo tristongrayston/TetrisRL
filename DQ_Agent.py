@@ -9,18 +9,18 @@ from collections import deque
 
 # HYPERPARAMS
 REPLAY_BUFFER_MAX_LENGTH = 100000
-BUFFER_BATCH_SIZE = 128
-BATCH_SIZE = 64 
+BUFFER_BATCH_SIZE = 64
+BATCH_SIZE = 32
 GAMMA = 0.99
-TARGET_UPDATE = 150
-EPSILON_START = 0.99 # Epsilon Start
-EPSILON_END = 0.2 # Epsilon End
-EPSILON_DECAY = 0.00008 # Epsilon Decay
+TARGET_UPDATE = 32
+EPSILON_START = 0.5 # Epsilon Start
+EPSILON_END = 0.1 # Epsilon End
+EPSILON_DECAY = 0.000008 # Epsilon Decay
 LR = 1e-4
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-path = "model_params_7.pt"
-save_to_path = "model_params_8.pt"
+path = "model_params_v6_1.pt"
+save_to_path = "model_params_v6_2.pt"
 
 
 class ReplayBuffer():
@@ -32,10 +32,14 @@ class ReplayBuffer():
         self.memory.append(experience)
 
     def collect_memory(self) -> tuple:
-        if np.random.rand() < 0.8:
-            return self.memory.pop()
-        else:
-            return rnd.choice(self.memory)
+        return self.memory.pop()
+        # if np.random.rand() < 0.8:
+        #     return self.memory.pop()
+        # else:
+        #     return rnd.choice(self.memory)
+        
+    def erase_memory(self):
+        self.memory.clear()
     
     def __len__(self) -> int:
         return len(self.memory)
@@ -60,14 +64,14 @@ class DQNAgent():
 
     def create_model(self, input_dims, output_dims):
         model = nn.Sequential(
-            nn.Conv2d(2, 32, kernel_size=4),
+            nn.Conv2d(2, 64, kernel_size=4),
             nn.ReLU(),
-            nn.Conv2d(32, 1, kernel_size=4),
+            #nn.MaxPool2d(kernel_size=2, stride=1),
+            nn.Conv2d(64, 1, kernel_size=2),
+            nn.MaxPool2d(kernel_size=2, stride=1),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(56, 128),
-            nn.ReLU(),
-            nn.Linear(128, 128),
+            nn.Linear(75, 128),
             nn.ReLU(),
             nn.Linear(128, 128),
             nn.ReLU(),
@@ -82,7 +86,7 @@ class DQNAgent():
         #print(state.shape)
         self.actions_taken += 1
         self.total_actions_taken += 1
-        EPSILON = EPSILON_END # (EPSILON_START)*np.exp(-EPSILON_DECAY*self.total_actions_taken)
+        EPSILON =  (EPSILON_START)*np.exp(-EPSILON_DECAY*self.total_actions_taken) #EPSILON_END 
 
         with torch.no_grad():
             #input = state_array.reshape(1)
@@ -91,7 +95,8 @@ class DQNAgent():
             q_values = self.target_model.forward(input_state)
 
         #print(q_values)
-        if rnd.random() > EPSILON_START - EPSILON:
+        #if rnd.random() < EPSILON + EPSILON_END:
+        if rnd.random() < 0.1:
             # Pick a random action
             action = torch.tensor([rnd.randrange(0, 4)])
         else:
@@ -122,33 +127,35 @@ class DQNAgent():
             reward.append(r)
             next_state.append(torch.tensor(n, dtype=torch.float32).to(device))
 
-
-
-        # TENSORS
-
-        # Convert lists to tensors
-        #state_tensors = [torch.tensor(s).flatten() for s in state]
+        # Convert list of tensors to tensor.
 
         state_tensors = torch.stack(state)
         new_state_tensors = torch.stack(next_state)
-        #action = torch.eye(4)[action].to(device)
-        action = torch.tensor(action).to(device)
+
+        # One hot encoding our actions. 
+        action = torch.eye(4)[action].to(device)
+        #action = torch.tensor(action).to(device)
+
         #next_state = torch.tensor(next_state).to(device)
+
         # We normalize our rewards for a more stable learning process
         rewards = torch.tensor(reward, dtype=torch.float32).to(device)
-        # rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
+        rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
 
-        #print(rewards)
-        #print(action)
         #Find our predictions
         with torch.no_grad():
+            # This gets the maximum possible Q value of our next turn
             target_predictions = self.target_model(new_state_tensors).max(dim=1)[0]
         
-        model_predictions = self.model(state_tensors).max(dim=1)[0]*action # .max(dim=1)[action]
-        
+        # this gets the models assessed Q value of the current turn. 
+        model_predictions = self.model(state_tensors)*action
+        model_predictions = torch.sum(model_predictions, dim=1)
+
+        #model_predictions = self.model(state_tensors).max(dim=1)[0][action] # .max(dim=1)[action]
+
         # Calculate our target
         target = rewards + GAMMA*target_predictions
-        
+
         # Calculate MSE Loss
         loss = criterion(model_predictions, target)
         
@@ -157,8 +164,18 @@ class DQNAgent():
         # backward pass
         self.optimizer.zero_grad()
         loss.backward()
-        # print(len(self.replay_memory.memory))
+
+        # Clip Gradients
+
+        # By value
+        # torch.nn.utils.clip_grad_value_(self.model.parameters(), 1)
+
+        # By norm
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1, norm_type=2)
+
+
         self.optimizer.step()
+
         #print("learning..")
         self.update_target_counter += 1
         #print(self.update_target_counter)
@@ -171,7 +188,11 @@ class DQNAgent():
         torch.save(self.target_model.state_dict(), save_to_path)
 
     def load(self):
-        torch.load(path)
+        self.target_model.load_state_dict(torch.load(path))
+        self.model.load_state_dict(torch.load(path))
+
+        print(f'CURRENT MODEL VERSION: {path}')
+
 
 # if __name__ == "__main__":
 #     agent = DQNAgent((1, 10, 20), 4)
